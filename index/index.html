@@ -1,0 +1,455 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UNESCO Map</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; width: 100%; }
+
+    .marker-cluster-small {
+	  background-color: rgba(107, 114, 128, 0.18);
+	}
+	.marker-cluster-small div {
+	  background-color: rgba(107, 114, 128, 0.55);
+	  color: #fff;
+	  font-weight: 700;
+	}
+
+    .marker-cluster-medium { background-color: rgba(77, 163, 255, 0.25); }
+    .marker-cluster-medium div {
+      background-color: rgba(77, 163, 255, 0.85);
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .marker-cluster-large { background-color: rgba(30, 64, 175, 0.25); }
+    .marker-cluster-large div {
+      background-color: rgba(30, 64, 175, 0.9);
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .leaflet-popup-content {
+      margin: 10px 12px;
+      width: clamp(240px, 45vw, 460px);
+    }
+    .popup-title-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .popup-title {
+      font-weight: 800;
+      font-size: 16px;
+      line-height: 1.2;
+    }
+    .danger-badge {
+      font-weight: 800;
+      color: #d32f2f;
+      font-size: 12px;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      border: 1px solid #d32f2f;
+      padding: 2px 6px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .popup-country { opacity: 0.8; margin-bottom: 8px; }
+    .popup-meta { opacity: 0.8; margin-bottom: 8px; font-style: italic; }
+
+    .popup-desc {
+      max-height: min(45vh, 260px);
+      overflow: auto;
+      white-space: normal;
+      line-height: 1.35;
+    }
+
+    .floating-panel{
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      width: 200px;
+      background: rgba(255,255,255,0.95);
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+      z-index: 9999;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      user-select: none;
+    }
+    .panel-header{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 10px;
+      border-bottom: 1px solid #eee;
+      font-weight: 700;
+    }
+    .panel-body{
+      padding: 10px 10px 12px 10px;
+      font-size: 14px;
+      user-select: text;
+    }
+    .min-btn{
+      border: 0;
+      background: #f2f2f2;
+      width: 28px;
+      height: 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 18px;
+    }
+    .min-btn:hover{ background: #e8e8e8; }
+
+    .panel-status{
+      margin-top: 8px;
+      font-size: 12px;
+      opacity: 0.75;
+    }
+	
+	.map-legend {
+	  position: fixed;
+	  bottom: 16px;
+	  left: 16px;
+	  background: rgba(255,255,255,0.95);
+	  border: 1px solid #ddd;
+	  border-radius: 10px;
+	  padding: 10px 12px;
+	  font-size: 14px; /* same as panel-body */
+	  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; /* SAME font */
+	  box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+	  z-index: 9999;
+	}
+
+
+	.legend-row {
+	  display: flex;
+	  align-items: center;
+	  gap: 8px;
+	  margin-bottom: 6px;
+	}
+
+	.legend-dot {
+	  width: 10px;
+	  height: 10px;
+	  border-radius: 50%;
+	  flex-shrink: 0;
+	}
+
+  </style>
+</head>
+
+<body>
+	<div id="map"></div>
+
+	<div id="filterPanel" class="floating-panel">
+	<div class="panel-header">
+	  <span>Categories</span>
+	  <button id="togglePanelBtn" class="min-btn" title="Minimize">–</button>
+	</div>
+
+	<div id="panelBody" class="panel-body">
+	  <label><input type="checkbox" id="chkCultural" checked> Cultural</label><br />
+	  <label><input type="checkbox" id="chkNatural" checked> Natural</label><br />
+	  <label><input type="checkbox" id="chkMixed"> Mixed</label>
+	  <div id="statusLine" class="panel-status">Loading…</div>
+	</div>
+	</div>
+  
+	<div class="map-legend">
+	  <div class="legend-row">
+		<span class="legend-dot" style="background:#1565c0"></span>
+		Cultural
+	  </div>
+	  <div class="legend-row">
+		<span class="legend-dot" style="background:#2e7d32"></span>
+		Natural
+	  </div>
+	  <div class="legend-row">
+		<span class="legend-dot" style="background:#6a1b9a"></span>
+		Mixed
+	  </div>
+	  <div class="legend-row">
+		<span class="legend-dot" style="background:#d32f2f"></span>
+		Dangerous
+	  </div>
+	</div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+  <script>
+  document.addEventListener("DOMContentLoaded", () => {
+    // =========================
+    // CONFIG
+    // =========================
+    const GEOJSON_FILE = "sites.geojson";
+    const DANGER_FIELD = "danger";
+    const CATEGORY_FIELD = "heritage_category";
+    const CLUSTER_MIN_COUNT = 10;
+
+    const DISABLE_CLUSTERING_AT_ZOOM = 6;
+    const RADIUS_ZOOM6PLUS = 12;
+    const RADIUS_ZOOM4TO5 = 25;
+    const RADIUS_ZOOM0TO3 = 60;
+
+    // Dot colors
+    const DANGER_RED = "#d32f2f";
+    const CULTURAL_BLUE = "#1565c0";
+    const NATURAL_GREEN = "#2e7d32";
+    const MIXED_PURPLE = "#6a1b9a";
+    const UNKNOWN_GRAY = "#6b7280";
+
+    // =========================
+    // MAP SETUP
+    // =========================
+    const map = L.map("map", { preferCanvas: true, worldCopyJump: true }).setView([20, 0], 2);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap"
+    }).addTo(map);
+
+    // =========================
+    // CLUSTER SETUP
+    // =========================
+    function defaultClusterIcon(cluster) {
+      const count = cluster.getChildCount();
+      const sizeClass =
+        count < 10 ? "marker-cluster-small" :
+        count < 100 ? "marker-cluster-medium" :
+        "marker-cluster-large";
+
+      return new L.DivIcon({
+        html: `<div><span>${count}</span></div>`,
+        className: `marker-cluster ${sizeClass}`,
+        iconSize: new L.Point(40, 40)
+      });
+    }
+
+    const cluster = L.markerClusterGroup({
+      chunkedLoading: true,
+      chunkInterval: 50,
+      chunkDelay: 10,
+
+      disableClusteringAtZoom: DISABLE_CLUSTERING_AT_ZOOM,
+
+      maxClusterRadius: (zoom) => {
+        if (zoom >= DISABLE_CLUSTERING_AT_ZOOM) return RADIUS_ZOOM6PLUS;
+        if (zoom >= 4) return RADIUS_ZOOM4TO5;
+        return RADIUS_ZOOM0TO3;
+      },
+
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+
+      iconCreateFunction: function (cl) {
+        const count = cl.getChildCount();
+        if (count < CLUSTER_MIN_COUNT) {
+          return new L.DivIcon({
+            html: "",
+            className: "marker-cluster-hidden",
+            iconSize: new L.Point(0, 0)
+          });
+        }
+        return defaultClusterIcon(cl);
+      }
+    });
+
+    map.addLayer(cluster);
+
+    cluster.on("clusterclick", (e) => {
+      if (e.layer.getChildCount() < CLUSTER_MIN_COUNT) e.layer.spiderfy();
+    });
+
+    function spiderfySmallClusters() {
+      cluster.eachLayer(layer => {
+        if (layer && typeof layer.getChildCount === "function") {
+          if (layer.getChildCount() < CLUSTER_MIN_COUNT) layer.spiderfy();
+        }
+      });
+    }
+
+    map.on("zoomend moveend", () => setTimeout(spiderfySmallClusters, 0));
+
+    // =========================
+    // HELPERS
+    // =========================
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function normCategory(cat) {
+      return String(cat ?? "").trim().toLowerCase();
+    }
+
+    function isDangerous(v) {
+      return Number(String(v ?? "").trim()) === 1;
+    }
+
+    function categoryColor(catRaw) {
+      const cat = normCategory(catRaw);
+      if (cat === "cultural") return CULTURAL_BLUE;
+      if (cat === "natural") return NATURAL_GREEN;
+      if (cat === "mixed") return MIXED_PURPLE;
+      return UNKNOWN_GRAY;
+    }
+
+    // FILTER UI
+    const toggleBtn = document.getElementById("togglePanelBtn");
+    const panelBody = document.getElementById("panelBody");
+    const statusLine = document.getElementById("statusLine");
+
+    const chkCultural = document.getElementById("chkCultural");
+    const chkNatural  = document.getElementById("chkNatural");
+    const chkMixed    = document.getElementById("chkMixed");
+
+    let minimized = false;
+
+    toggleBtn.addEventListener("click", () => {
+      minimized = !minimized;
+      panelBody.style.display = minimized ? "none" : "block";
+      toggleBtn.textContent = minimized ? "+" : "–";
+      toggleBtn.title = minimized ? "Expand" : "Minimize";
+    });
+
+    function shouldShow(categoryRaw) {
+      const category = normCategory(categoryRaw);
+
+      const c = chkCultural.checked;
+      const n = chkNatural.checked;
+      const m = chkMixed.checked;
+
+      if (!c && !n && !m) return false;
+
+      // Mixed checked alone => Mixed only
+      if (m && !c && !n) return category === "mixed";
+
+      // Cultural + Natural => all
+      if (c && n) return true;
+
+      // Cultural => Cultural + Mixed
+      if (c) return category === "cultural" || category === "mixed";
+
+      // Natural => Natural + Mixed
+      if (n) return category === "natural" || category === "mixed";
+
+      return false;
+    }
+
+    function filterLabel() {
+      const c = chkCultural.checked;
+      const n = chkNatural.checked;
+      const m = chkMixed.checked;
+
+      if (!c && !n && !m) return "None";
+      if (m && !c && !n) return "Mixed";
+      if (c && n) return "All";
+      if (c) return "Cultural + Mixed";
+      if (n) return "Natural + Mixed";
+      return "None";
+    }
+
+    // DATA + RENDER
+    let allGeojsonData = null;
+    let didInitialFit = false;
+
+    function renderFiltered() {
+      if (!allGeojsonData) return;
+
+      cluster.clearLayers();
+
+      let shown = 0;
+
+      const geo = L.geoJSON(allGeojsonData, {
+        filter: (feature) => shouldShow(feature?.properties?.[CATEGORY_FIELD]),
+
+        pointToLayer: (feature, latlng) => {
+          shown++;
+
+          const props = feature.properties || {};
+          const name = props.name_en ?? "(no name)";
+          const country = props.states_name_en ?? "";
+          const descHtml = props.short_description_en ?? "";
+          const categoryText = props[CATEGORY_FIELD] ?? "";
+
+          const dangerous = isDangerous(props[DANGER_FIELD]);
+          const color = dangerous ? DANGER_RED : categoryColor(categoryText);
+
+          const marker = L.circleMarker(latlng, {
+            radius: 5.5,
+            weight: 1,
+            color: color,
+            fillColor: color,
+            fillOpacity: 0.85
+          });
+		  marker.options.hitRadius = 12;
+          marker.bindTooltip(String(name), { direction: "top", sticky: true });
+
+          const popupHtml = `
+            <div class="popup-title-row">
+              <div class="popup-title">${escapeHtml(name)}</div>
+              ${dangerous ? `<span class="danger-badge">DANGEROUS</span>` : ``}
+            </div>
+            ${country ? `<div class="popup-country">${escapeHtml(country)}</div>` : ``}
+            ${categoryText ? `<div class="popup-meta">${escapeHtml(categoryText)}</div>` : ``}
+            <div class="popup-desc">${descHtml}</div>
+          `;
+
+          marker.bindPopup(popupHtml, { maxWidth: 520, closeButton: true });
+          return marker;
+        }
+      });
+
+      cluster.addLayer(geo);
+
+      statusLine.textContent = `Showing: ${filterLabel()} • Points: ${shown}`;
+
+      if (!didInitialFit) {
+        didInitialFit = true;
+        try {
+          map.fitBounds(cluster.getBounds(), { padding: [20, 20] });
+        } catch (e) {}
+      }
+
+      setTimeout(spiderfySmallClusters, 0);
+    }
+
+    [chkCultural, chkNatural, chkMixed].forEach(el => {
+      el.addEventListener("change", renderFiltered);
+    });
+
+    // Cache-bust so you always load the newest sites.geojson from the same directory
+    fetch(`${GEOJSON_FILE}?v=${Date.now()}`)
+      .then(r => r.json())
+      .then(data => {
+        allGeojsonData = data;
+
+        // DEBUG: expose GeoJSON in DevTools console
+        window.__DEBUG_GEOJSON__ = data;
+
+        renderFiltered();
+      })
+      .catch(err => {
+        console.error("Failed to load sites.geojson:", err);
+        alert("Could not load sites.geojson. Use a local server (not file://).");
+      });
+
+  });
+  </script>
+</body>
+</html>

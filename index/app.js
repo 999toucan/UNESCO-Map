@@ -166,13 +166,13 @@ document.addEventListener("DOMContentLoaded", () => {
     return { start, end };
   }
 
-	function rangesOverlap(start, end, binStart, binEndExclusive) {
-	  if (start == null || end == null) return false;
+  function rangesOverlap(start, end, binStart, binEndExclusive) {
+    if (start == null || end == null) return false;
 
-	  // Treat feature as [start, end) (end exclusive)
-	  // and bin as [binStart, binEndExclusive)
-	  return start < binEndExclusive && end > binStart;
-	}
+    // Treat feature as [start, end) (end exclusive)
+    // and bin as [binStart, binEndExclusive)
+    return start < binEndExclusive && end > binStart;
+  }
 
   function timelinePasses(props) {
     if (activeBinStart == null) return true;
@@ -386,10 +386,15 @@ document.addEventListener("DOMContentLoaded", () => {
         marker.bindPopup(popupHtml, { maxWidth: 520, closeButton: true });
 
         marker.on("popupopen", () => {
-          if (!pictureUrl) return;
-
           const img = document.getElementById(imgId);
           const note = document.getElementById(`${imgId}_note`);
+
+          if (!pictureUrl) {
+            if (img) img.remove();
+            if (note) note.textContent = "No image available.";
+            return;
+          }
+
           if (!img || img.dataset.loaded === "1") return;
 
           img.onload = () => {
@@ -399,8 +404,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
           img.onerror = () => {
             img.dataset.loaded = "1";
-            img.style.display = "none";
-            if (note) note.textContent = "Image failed to load.";
+            if (img) img.remove();
+            if (note) note.textContent = "No image available.";
           };
 
           img.src = pictureUrl;
@@ -433,18 +438,21 @@ document.addEventListener("DOMContentLoaded", () => {
   buildTimelineSliderUI();
 
   // Load GeoJSON
-	fetch("/convert/sites.geojson")
-	  .then((r) => {
-		if (!r.ok) throw new Error(`HTTP ${r.status} while loading /convert/sites.geojson`);
-		return r.json();
-	  })
-	  .then((data) => {
-		allGeojsonData = data;
-		window.__DEBUG_GEOJSON__ = data;
-		renderFiltered();
-	  })
-	  .catch((err) => {
-		console.error("Failed to load sites.geojson:", err);
-		alert("Could not load sites.geojson. Check /convert/sites.geojson path.");
-	  });
+  fetch("/convert/sites.geojson")
+    .then((r) => {
+      if (!r.ok)
+        throw new Error(
+          `HTTP ${r.status} while loading /convert/sites.geojson`,
+        );
+      return r.json();
+    })
+    .then((data) => {
+      allGeojsonData = data;
+      window.__DEBUG_GEOJSON__ = data;
+      renderFiltered();
+    })
+    .catch((err) => {
+      console.error("Failed to load sites.geojson:", err);
+      alert("Could not load sites.geojson. Check /convert/sites.geojson path.");
+    });
 });

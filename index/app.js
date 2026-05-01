@@ -17,16 +17,25 @@ document.addEventListener("DOMContentLoaded", () => {
   const MIXED_PURPLE = "#6a1b9a";
   const UNKNOWN_GRAY = "#6b7280";
 
-  // TIMELINE CONFIG (slider, 100-year bins)
-  const TIMELINE_MIN = -1400; // 1400 BC
+  // TIMELINE CONFIG
+  const LONG_AGO_YEAR = -50001;
+  const LONG_AGO_POSITION = 0;
+  const OLD_BC_START_POSITION = 1;
+  const RECENT_BC_START_POSITION = 4;
+  const AD_START_POSITION = 9;
+  const AD_END_POSITION = 14;
+  const TIMELINE_MIN = LONG_AGO_POSITION;
+  const NORMAL_TIMELINE_MIN = -50000; // 50,000 BC
+  const RECENT_BC_MIN = -2000;
   const TIMELINE_MAX = 2026; // 2026 AD
-  const BIN_SIZE = 100;
+  const RECENT_TICK_YEARS = 100;
+  const OLD_BC_TICK_YEARS_LIST = [-50000, -40000, -30000, -20000, -10000];
 
   // If true: when a bin is selected, ALSO show sites with unknown/null dates.
   // If false: unknown dates are hidden when a bin is selected.
   const SHOW_UNKNOWN_DATES_WHEN_FILTERING = false;
 
-  let activeBinStart = null; // null = no timeline filter
+  let activeTimelineYear = null; // null = no timeline filter
 
   // MAP SETUP
   const map = L.map("map", { preferCanvas: true, worldCopyJump: true }).setView(
@@ -129,10 +138,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return UNKNOWN_GRAY;
   }
 
-  // ---------------------------
-  // DATE NORMALIZATION (BC/AD)
-  // bc_ad can be null -> default AD
-  // ---------------------------
+  // DATE NORMALIZATION (timeline_start/timeline_end preferred)
   function toYearNumber(year, bcAd) {
     if (year == null || year === "") return null;
 
@@ -150,6 +156,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const d = props?.date ?? null;
     if (!d) return { start: null, end: null };
 
+    if (d.BC_AD === "LONG_AGO") {
+      return { start: LONG_AGO_YEAR, end: LONG_AGO_YEAR };
+    }
+
+    const timelineStart = Number(d.timeline_start);
+    const timelineEnd = Number(d.timeline_end);
+    if (Number.isFinite(timelineStart) && Number.isFinite(timelineEnd)) {
+      return {
+        start: Math.min(timelineStart, timelineEnd),
+        end: Math.max(timelineStart, timelineEnd),
+      };
+    }
+
     const bcAd = d.BC_AD; // can be null
 
     let start = toYearNumber(d.start_date, bcAd);
@@ -166,38 +185,131 @@ document.addEventListener("DOMContentLoaded", () => {
     return { start, end };
   }
 
-  function rangesOverlap(start, end, binStart, binEndExclusive) {
-    if (start == null || end == null) return false;
+  function isFeatureVisibleAtTimelineYear(feature, selectedYear) {
+    if (selectedYear == null) return true;
 
-    // Treat feature as [start, end) (end exclusive)
-    // and bin as [binStart, binEndExclusive)
-    return start < binEndExclusive && end > binStart;
-  }
-
-  function timelinePasses(props) {
-    if (activeBinStart == null) return true;
-
+    const props = feature?.properties || feature || {};
     const { start, end } = normalizeFeatureDate(props);
     if (start == null || end == null) return SHOW_UNKNOWN_DATES_WHEN_FILTERING;
 
-    const binStart = activeBinStart;
-    const binEndExclusive = Math.min(
-      activeBinStart + BIN_SIZE,
-      TIMELINE_MAX + 1,
-    );
+    if (props?.date?.BC_AD === "LONG_AGO") {
+      return selectedYear === LONG_AGO_YEAR;
+    }
 
-    return rangesOverlap(start, end, binStart, binEndExclusive);
+    return selectedYear >= start && selectedYear <= end;
   }
 
   function formatYear(y) {
+    if (y === LONG_AGO_YEAR) return "A long time ago";
+    if (y === 0) return "0 BC";
     if (y < 0) return `${Math.abs(y)} BC`;
     return `${y} AD`;
   }
 
-  function formatRange(binStart) {
-    if (binStart == null) return "All dates";
-    const end = Math.min(binStart + BIN_SIZE, TIMELINE_MAX);
-    return `${formatYear(binStart)} → ${formatYear(end)}`;
+  function formatTimelineReadout(value) {
+    if (value == null) return "Timeline: All dates";
+    return `Timeline: ${formatYear(value)}`;
+  }
+
+  function timelineYearToSliderPosition(year) {
+    if (year === LONG_AGO_YEAR) return LONG_AGO_POSITION;
+    if (year < RECENT_BC_MIN) {
+      return (
+        OLD_BC_START_POSITION +
+        ((year - NORMAL_TIMELINE_MIN) /
+          (RECENT_BC_MIN - NORMAL_TIMELINE_MIN)) *
+          (RECENT_BC_START_POSITION - OLD_BC_START_POSITION)
+      );
+    }
+    if (year <= 0) {
+      return (
+        RECENT_BC_START_POSITION +
+        ((year - RECENT_BC_MIN) / Math.abs(RECENT_BC_MIN)) *
+          (AD_START_POSITION - RECENT_BC_START_POSITION)
+      );
+    }
+    return AD_START_POSITION + (year / TIMELINE_MAX) * (AD_END_POSITION - AD_START_POSITION);
+  }
+
+  function sliderPositionToTimelineYear(position) {
+    if (position < OLD_BC_START_POSITION) return LONG_AGO_YEAR;
+    if (position < RECENT_BC_START_POSITION) {
+      const oldBcYear =
+        NORMAL_TIMELINE_MIN +
+        ((position - OLD_BC_START_POSITION) /
+          (RECENT_BC_START_POSITION - OLD_BC_START_POSITION)) *
+          (RECENT_BC_MIN - NORMAL_TIMELINE_MIN);
+      return nearestYear(oldBcYear, OLD_BC_TICK_YEARS_LIST);
+    }
+    if (position <= AD_START_POSITION) {
+      const recentBcYear =
+        RECENT_BC_MIN +
+        ((position - RECENT_BC_START_POSITION) /
+          (AD_START_POSITION - RECENT_BC_START_POSITION)) *
+          Math.abs(RECENT_BC_MIN);
+      return Math.round(recentBcYear / RECENT_TICK_YEARS) * RECENT_TICK_YEARS;
+    }
+    const adYear =
+      ((position - AD_START_POSITION) / (AD_END_POSITION - AD_START_POSITION)) *
+      TIMELINE_MAX;
+    if (adYear > TIMELINE_MAX - RECENT_TICK_YEARS / 2) return TIMELINE_MAX;
+    return Math.min(
+      TIMELINE_MAX,
+      Math.max(0, Math.round(adYear / RECENT_TICK_YEARS) * RECENT_TICK_YEARS),
+    );
+  }
+
+  function nearestYear(year, candidates) {
+    return candidates.reduce((best, candidate) =>
+      Math.abs(candidate - year) < Math.abs(best - year) ? candidate : best,
+    );
+  }
+
+  function positionPercent(position) {
+    return `${((position - TIMELINE_MIN) / (AD_END_POSITION - TIMELINE_MIN)) * 100}%`;
+  }
+
+function addTimelineLabel(container, label, year, className = "") {
+    const span = document.createElement("span");
+    span.textContent = label;
+    span.className = `timeline-label ${className}`.trim();
+    span.style.left = positionPercent(timelineYearToSliderPosition(year));
+    container.appendChild(span);
+  }
+
+  function addTimelineTick(container, year, className = "") {
+    const span = document.createElement("span");
+    span.className = `timeline-tick ${className}`.trim();
+    span.style.left = positionPercent(timelineYearToSliderPosition(year));
+    container.appendChild(span);
+  }
+
+  function addTimelineEndpoint(container, year) {
+    const span = document.createElement("span");
+    span.className = "timeline-tick timeline-endpoint";
+    span.style.left = positionPercent(timelineYearToSliderPosition(year));
+    container.appendChild(span);
+  }
+
+  function formatBuiltHistory(props) {
+    const history = props?.construction_history;
+    const dateDisplay = props?.date?.display;
+    const builtText = dateDisplay || history?.llm_built;
+    if (!builtText) return "";
+
+    const built = escapeHtml(builtText);
+    const evidence = history?.llm_evidence
+      ? `<div class="popup-evidence">${escapeHtml(history.llm_evidence)}</div>`
+      : "";
+    const renovated = history?.llm_renovated
+      ? `<div class="popup-meta">Renovated: ${escapeHtml(history.llm_renovated)}</div>`
+      : "";
+
+    return `
+      <div class="popup-built">Built: ${built}</div>
+      ${renovated}
+      ${evidence}
+    `;
   }
 
   // FILTER UI (categories panel)
@@ -253,32 +365,52 @@ document.addEventListener("DOMContentLoaded", () => {
     const slider = document.getElementById("timelineSlider");
     const readout = document.getElementById("timelineReadout");
     const clearBtn = document.getElementById("timelineClear");
+    const labelBox = document.getElementById("timelineLabels");
     if (!slider || !readout || !clearBtn) return;
 
-    const steps = Math.floor((TIMELINE_MAX - TIMELINE_MIN) / BIN_SIZE);
-    slider.min = "0";
-    slider.max = String(steps);
-    slider.step = "1";
-    slider.value = "0";
+    slider.min = String(TIMELINE_MIN);
+    slider.max = String(AD_END_POSITION);
+    slider.step = "0.01";
+    slider.value = String(timelineYearToSliderPosition(TIMELINE_MAX));
+
+    if (labelBox) {
+      labelBox.innerHTML = "";
+      addTimelineEndpoint(labelBox, LONG_AGO_YEAR);
+      OLD_BC_TICK_YEARS_LIST.forEach((year) => {
+        addTimelineTick(labelBox, year, "timeline-tick-major");
+      });
+      for (let year = RECENT_BC_MIN; year <= 0; year += RECENT_TICK_YEARS) {
+        addTimelineTick(labelBox, year);
+      }
+      for (let year = RECENT_TICK_YEARS; year <= 2000; year += RECENT_TICK_YEARS) {
+        addTimelineTick(labelBox, year);
+      }
+      addTimelineEndpoint(labelBox, TIMELINE_MAX);
+      addTimelineLabel(labelBox, "2000 BC", RECENT_BC_MIN);
+      addTimelineLabel(labelBox, "0 BC", 0);
+      addTimelineLabel(labelBox, "1000", 1000);
+      addTimelineLabel(labelBox, "1500", 1500);
+      addTimelineLabel(labelBox, "1900", 1900);
+    }
 
     // Default to "All dates"
-    activeBinStart = null;
-    readout.textContent = `Timeline: ${formatRange(activeBinStart)}`;
+    activeTimelineYear = null;
+    readout.textContent = formatTimelineReadout(activeTimelineYear);
 
     // Drag updates while sliding
     slider.addEventListener("input", () => {
-      const idx = Number(slider.value);
-      const binStart = TIMELINE_MIN + idx * BIN_SIZE;
+      const selectedYear = sliderPositionToTimelineYear(Number(slider.value));
 
-      activeBinStart = binStart;
-      readout.textContent = `Timeline: ${formatRange(activeBinStart)}`;
+      activeTimelineYear = selectedYear;
+      slider.value = String(timelineYearToSliderPosition(selectedYear));
+      readout.textContent = formatTimelineReadout(activeTimelineYear);
       renderFiltered();
     });
 
     // Clear back to all
     clearBtn.addEventListener("click", () => {
-      activeBinStart = null;
-      readout.textContent = `Timeline: ${formatRange(activeBinStart)}`;
+      activeTimelineYear = null;
+      readout.textContent = formatTimelineReadout(activeTimelineYear);
       renderFiltered();
     });
   }
@@ -296,7 +428,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const geo = L.geoJSON(allGeojsonData, {
       filter: (feature) => {
         const props = feature?.properties || {};
-        return shouldShow(props?.[CATEGORY_FIELD]) && timelinePasses(props);
+        return (
+          shouldShow(props?.[CATEGORY_FIELD]) &&
+          isFeatureVisibleAtTimelineYear(feature, activeTimelineYear)
+        );
       },
 
       pointToLayer: (feature, latlng) => {
@@ -363,6 +498,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
           ${country ? `<div class="popup-country">${escapeHtml(country)}</div>` : ``}
           ${categoryText ? `<div class="popup-meta">${escapeHtml(categoryText)}</div>` : ``}
+          ${formatBuiltHistory(props)}
 
           ${
             pictureUrl
@@ -418,7 +554,7 @@ document.addEventListener("DOMContentLoaded", () => {
     cluster.addLayer(geo);
 
     // status line includes category + timeline
-    statusLine.textContent = `Showing: ${filterLabel()} • Timeline: ${formatRange(activeBinStart)} • Points: ${shown}`;
+    statusLine.textContent = `Showing: ${filterLabel()} - ${formatTimelineReadout(activeTimelineYear)} - Points: ${shown}`;
 
     if (!didInitialFit) {
       didInitialFit = true;
@@ -436,6 +572,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Init timeline slider UI (requires timelineBox HTML in index.html)
   buildTimelineSliderUI();
+
+  console.debug("Timeline date checks", [
+    { input: "ten million years ago", visibleAt: LONG_AGO_YEAR, sliderAt: LONG_AGO_POSITION },
+    { input: "17th century", range: [1600, 1699] },
+    { input: "1310", range: [1310, 1310] },
+    { input: "1700s", range: [1700, 1799] },
+    { input: "10th century BC", range: [-999, -900] },
+    { input: "5th millennium BC", range: [-5000, -4000] },
+    { input: "1400-1600", range: [1400, 1600] },
+  ]);
 
   // Load GeoJSON
   fetch("/convert/sites.geojson")

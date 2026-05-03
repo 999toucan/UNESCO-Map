@@ -320,6 +320,11 @@
       .timeline-clear:hover {
         background: #f7f7f7;
       }
+      .timeline-clear.is-active {
+        background: #111827;
+        border-color: #111827;
+        color: #fff;
+      }
     </style>
   </head>
 
@@ -375,6 +380,14 @@
         />
         <button id="timelineClear" class="timeline-clear" type="button">
           All
+        </button>
+        <button
+          id="timelineUnknownToggle"
+          class="timeline-clear"
+          type="button"
+          aria-pressed="false"
+        >
+          Unknown
         </button>
       </div>
       <div id="timelineLabels" class="timeline-labels" aria-hidden="true"></div>

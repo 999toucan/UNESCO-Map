@@ -31,11 +31,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const RECENT_TICK_YEARS = 100;
   const OLD_BC_TICK_YEARS_LIST = [-50000, -40000, -30000, -20000, -10000];
 
-  // If true: when a bin is selected, ALSO show sites with unknown/null dates.
-  // If false: unknown dates are hidden when a bin is selected.
-  const SHOW_UNKNOWN_DATES_WHEN_FILTERING = false;
-
   let activeTimelineYear = null; // null = no timeline filter
+  let includeUnknownDatesWhenFiltering = false;
 
   // MAP SETUP
   const map = L.map("map", { preferCanvas: true, worldCopyJump: true }).setView(
@@ -190,7 +187,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const props = feature?.properties || feature || {};
     const { start, end } = normalizeFeatureDate(props);
-    if (start == null || end == null) return SHOW_UNKNOWN_DATES_WHEN_FILTERING;
+    if (start == null || end == null) return includeUnknownDatesWhenFiltering;
 
     if (props?.date?.BC_AD === "LONG_AGO") {
       return selectedYear === LONG_AGO_YEAR;
@@ -365,6 +362,7 @@ function addTimelineLabel(container, label, year, className = "") {
     const slider = document.getElementById("timelineSlider");
     const readout = document.getElementById("timelineReadout");
     const clearBtn = document.getElementById("timelineClear");
+    const unknownBtn = document.getElementById("timelineUnknownToggle");
     const labelBox = document.getElementById("timelineLabels");
     if (!slider || !readout || !clearBtn) return;
 
@@ -411,6 +409,13 @@ function addTimelineLabel(container, label, year, className = "") {
     clearBtn.addEventListener("click", () => {
       activeTimelineYear = null;
       readout.textContent = formatTimelineReadout(activeTimelineYear);
+      renderFiltered();
+    });
+
+    unknownBtn?.addEventListener("click", () => {
+      includeUnknownDatesWhenFiltering = !includeUnknownDatesWhenFiltering;
+      unknownBtn.classList.toggle("is-active", includeUnknownDatesWhenFiltering);
+      unknownBtn.setAttribute("aria-pressed", String(includeUnknownDatesWhenFiltering));
       renderFiltered();
     });
   }

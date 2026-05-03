@@ -1,25 +1,220 @@
 # UNESCO Heritage Map
 
-## Project Overview
+Interactive Leaflet map of UNESCO World Heritage Sites with category filters and a timeline based on estimated construction/origin dates.
 
-This project is an interactive Leaflet map of UNESCO World Heritage Sites. It shows sites as clustered markers, supports category filtering, and includes a timeline slider for exploring sites by estimated construction or origin date.
-
-The frontend reads one GeoJSON file:
+The frontend reads:
 
 ```text
 convert/sites.geojson
 ```
 
-Each feature can include:
+## Main Workflow
+
+Use three separate scripts:
+
+| Step | Script | Output |
+| --- | --- | --- |
+| 1. LLM extraction | `convert/extract_construction_history.py` | `convert/llm_cache_gemini.json`, `convert/llm_cache_gpt.json` |
+| 2. Human label prep | `convert/human_label_disagreements.py` | `convert/llm_disagreements.json`, `convert/disagreements.csv` |
+| 3. Evaluation/dataset | `convert/evaluate_construction_dates.py` | `convert/eval_score.json`, `convert/fine_tune_dataset.jsonl` |
+
+The idea is simple:
+
+```text
+Run Gemini/GPT extraction -> compare disagreements -> label CSV by hand -> score/build JSONL
+```
+
+Prompting comes first. Human-labeled disagreements become the benchmark. Fine-tuning is optional later.
+
+## Quick Commands
+
+Run both extraction models:
+
+```bash
+python3 convert/extract_construction_history.py --both
+```
+
+Create the human-label CSV:
+
+```bash
+python3 convert/human_label_disagreements.py
+```
+
+Edit this file by hand:
+
+```text
+convert/disagreements.csv
+```
+
+Fill `human_choice` with one of:
+
+```text
+gemini
+gpt
+tie
+neither
+```
+
+If you know the exact correct date, also fill:
+
+```text
+correct_start, correct_end, correct_BC_AD, correct_display
+```
+
+Then score and build the labeled JSONL:
+
+```bash
+python3 convert/evaluate_construction_dates.py --score --build-dataset
+```
+
+Final useful outputs:
+
+```text
+convert/eval_score.json
+convert/fine_tune_dataset.jsonl
+```
+
+## Extraction
+
+Gemini extraction:
+
+```bash
+python3 convert/extract_construction_history.py --gemini
+```
+
+GPT extraction:
+
+```bash
+python3 convert/extract_construction_history.py --gpt
+```
+
+Both:
+
+```bash
+python3 convert/extract_construction_history.py --both
+```
+
+Small test batch:
+
+```bash
+LLM_BATCH_LIMIT=10 python3 convert/extract_construction_history.py --both
+```
+
+Force re-run API calls even when cache exists:
+
+```bash
+python3 convert/extract_construction_history.py --both --force
+```
+
+Local parser only, no API calls:
+
+```bash
+NO_LLM=1 python3 convert/extract_construction_history.py --no-llm
+```
+
+Extraction caches are resumable and saved atomically after each row.
+
+Cache behavior:
+
+- cached successful rows are reused automatically
+- pandas builds the filter table before API calls
+- duplicate rows are handled manually by cache key before API calls
+- `heritage_category=Natural` rows are handled manually without LLM calls and cached as `date: null`
+- `LLM_BATCH_LIMIT` max batch API calls
+- if `LLM_BATCH_LIMIT` is larger than the filtered row count, only the filtered row count is sent
+- if every row is already cached, extraction makes no API calls
+- use `--force` or `FORCE_LLM=1` to ignore cache and call APIs again
+
+## Human Labels
+
+Prepare disagreements:
+
+```bash
+python3 convert/human_label_disagreements.py
+```
+
+This compares the Gemini and GPT caches. A row is included when:
+
+- `llm_built` differs
+- normalized `date` differs
+- one model has `date: null` and the other does not
+
+It writes:
+
+```text
+convert/llm_disagreements.json
+convert/disagreements.csv
+```
+
+The CSV is for humans. Re-running the script preserves existing label columns, so AI output does not overwrite your labels.
+
+This step also uses pandas. It compares cache rows, preserves existing human labels, and writes the CSV without calling any model.
+
+## Evaluation
+
+Score labels:
+
+```bash
+python3 convert/evaluate_construction_dates.py --score
+```
+
+Build optional future fine-tune dataset:
+
+```bash
+python3 convert/evaluate_construction_dates.py --build-dataset
+```
+
+Do both:
+
+```bash
+python3 convert/evaluate_construction_dates.py --score --build-dataset
+```
+
+`--score` reads `convert/disagreements.csv` and writes:
+
+```text
+convert/eval_score.json
+```
+
+`--build-dataset` reads labeled rows and writes:
+
+```text
+convert/fine_tune_dataset.jsonl
+```
+
+Only labeled rows are included. Unlabeled rows are skipped.
+
+Scoring and dataset building use pandas to read/filter labeled rows. They do not call an LLM.
+
+## Models
+
+Extraction uses lighter models:
+
+```env
+GEMINI_MODEL=gemini-2.5-flash-lite
+OPENAI_MODEL=gpt-4o-mini
+```
+
+Evaluation metadata uses a stronger model config:
+
+```env
+EVAL_MODEL=gpt-4.1
+```
+
+Human labels are still the ground truth.
+
+## Result Shape
+
+Each cached LLM extraction result is normalized to:
 
 ```json
 {
-  "construction_history": {
-    "llm_built": "17th century",
-    "llm_renovated": null,
-    "llm_evidence": "short quote from the source text",
-    "llm_error": null
-  },
+  "provider": "gemini",
+  "site_id": 123,
+  "site_name": "Example Site",
+  "llm_built": "17th century",
+  "llm_renovated": null,
+  "evidence": "short quote from the source text",
   "date": {
     "start_date": 1600,
     "end_date": 1700,
@@ -27,182 +222,70 @@ Each feature can include:
     "display": "1600-1700 AD",
     "timeline_start": 1600,
     "timeline_end": 1700
-  }
+  },
+  "confidence": "high",
+  "error": null,
+  "tokens_used": {
+    "input": 1000,
+    "output": 120,
+    "total": 1120
+  },
+  "latency_ms": 900,
+  "cost_estimate": null
 }
 ```
 
-## Data Pipeline
+Rules:
 
-The notebook in `convert/Scripts.ipynb` is used for the earlier data preparation steps, such as building the UNESCO CSV/GeoJSON data and adding image URLs.
+- `null`, `None`, `unknown`, and empty values become `date: null`
+- Natural heritage sites are not sent to extraction models
+- missing dates are not guessed
+- `A long time ago` is only for explicit million-year cases
+- malformed LLM dates are validated and may fall back to the local parser
 
-The construction-date extraction is handled separately by:
+## Environment
 
-```text
-convert/extract_construction_history.py
-```
-
-That script:
-
-- loads `convert/sites.geojson`
-- sends each site description to Gemini
-- stores the raw LLM result in `properties.construction_history`
-- stores Gemini's normalized timeline object in `properties.date` when it is valid
-- falls back to the local Python parser when Gemini returns a malformed `date`
-- can run without Gemini by parsing dates directly from descriptions
-- saves progress after each row so interrupted runs can continue
-- uses `convert/llm_cache.json` to avoid repeated API calls
-
-## LLM Construction-Date Extraction
-
-The LLM is asked to find the earliest concrete evidence of a site's original creation, construction, opening, establishment, or completion.
-
-It should not use later renovation, restoration, alteration, expansion, heritage listing, reopening, or repair dates as the built date.
-
-Gemini now returns both the raw date text and the frontend-ready date object:
-
-- `construction_history.llm_built`: raw LLM answer, such as `"17th century"`
-- `date.display`: Gemini's normalized display text, such as `"1600-1700 AD"`
-- `date.timeline_start` and `date.timeline_end`: signed numeric years used by the frontend timeline
-
-Python still validates the returned `date` object before writing it to GeoJSON. If Gemini returns an invalid or incomplete date object, the script falls back to `convert/date_parser.py` and parses `llm_built`. If both fail, `properties.date` is set to `null`.
-
-You can also run without Gemini. In that mode the script parses the full site description locally. This is free and fast, but it does not understand context. It may grab a renovation date, a later historical period, or the wrong century if that appears before the true construction date.
-
-## Date Parsing Rules
-
-Fallback date parsing lives in:
-
-```text
-convert/date_parser.py
-```
-
-Gemini is asked to return this normalized shape directly, and the Python parser can produce the same shape as a backup:
-
-```json
-{
-  "start_date": 1600,
-  "end_date": 1700,
-  "BC_AD": "AD",
-  "display": "1600-1700 AD",
-  "timeline_start": 1600,
-  "timeline_end": 1700
-}
-```
-
-Examples:
-
-| LLM value | Parsed display |
-| --- | --- |
-| `"17th century"` | `1600-1700 AD` |
-| `"10th century BC"` | `900-1000 BC` |
-| `"5th millennium BC"` | `4000-5000 BC` |
-| `"1700s"` | `1700-1799 AD` |
-| `"ten million years ago"` | `A long time ago` |
-| `None`, `null`, or `unknown` | `null` |
-
-Timeline numeric rules:
-
-- AD years are positive.
-- BC years are negative for timeline comparison.
-- `900-1000 BC` is compared internally as `-1000` to `-900`.
-- Date ranges stay visible across the full range.
-- Dates older than `50,000 BC`, or anything like “million years ago,” are grouped into `A long time ago`.
-
-You can test the parser without calling Gemini:
-
-```bash
-python3 -m convert.extract_construction_history --test-parser
-```
-
-## Timeline Behavior
-
-The frontend timeline covers:
-
-```text
-A long time ago, then 50,000 BC to 2026 AD
-```
-
-The special `A long time ago` bucket is stored as:
-
-```json
-{
-  "BC_AD": "LONG_AGO",
-  "display": "A long time ago",
-  "timeline_start": -50001,
-  "timeline_end": -50001
-}
-```
-
-In the UI, that bucket is placed one 1000-year tick before `50,000 BC`, so it stays close to the normal human-history timeline instead of stretching the slider.
-
-When the timeline is cleared, all category-matching markers are shown. When a year is selected, a marker is visible if the selected year is between `date.timeline_start` and `date.timeline_end`.
-
-## Running The Pipeline
-
-Create or update `.env`:
+Create `.env` from `.env.example` and fill your keys:
 
 ```bash
 cp .env.example .env
-nano .env
 ```
 
-Run a small LLM batch:
-
-```bash
-LLM_BATCH_LIMIT=10 python3 convert/extract_construction_history.py
-```
-
-The same command also works as a module:
-
-```bash
-LLM_BATCH_LIMIT=10 python3 -m convert.extract_construction_history
-```
-
-Run full enrichment:
-
-```bash
-python3 convert/extract_construction_history.py
-```
-
-Force reprocess, ignoring existing cache/construction fields:
-
-```bash
-FORCE_LLM=1 python3 convert/extract_construction_history.py
-```
-
-Re-parse existing LLM results without making Gemini calls:
-
-```bash
-NORMALIZE_ONLY=1 python3 convert/extract_construction_history.py
-```
-
-Run without LLM calls by parsing descriptions locally:
-
-```bash
-NO_LLM=1 python3 -m convert.extract_construction_history
-```
-
-Safer no-LLM test run that writes a separate file:
-
-```bash
-NO_LLM=1 GEOJSON_OUTPUT=convert/sites.no_llm.geojson python3 -m convert.extract_construction_history
-```
-
-## Environment Variables
+Important variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `GEMINI_API_KEY` | Your Gemini API key. Required for LLM extraction. |
-| `GEMINI_MODEL` | Gemini model name. Current default is `gemini-2.5-flash-lite`. |
-| `GEOJSON_INPUT` | GeoJSON file to read. Usually `convert/sites.geojson`. |
-| `GEOJSON_OUTPUT` | GeoJSON file to write. Usually `convert/sites.geojson`. |
-| `LLM_CACHE_PATH` | Cache file for Gemini responses. Usually `convert/llm_cache.json`. |
-| `LLM_BATCH_LIMIT` | Optional limit for how many new LLM requests to make in one run. |
-| `LLM_REQUEST_DELAY_SECONDS` | Delay between requests to be friendlier to API rate limits. |
-| `FORCE_LLM` | Set to `1` to call Gemini again even when cached or existing results are present. |
-| `NO_LLM` | Set to `1` to skip Gemini and parse descriptions locally. Faster and free, but less accurate. |
+| `GEMINI_API_KEY` | Required for `--gemini` or `--both` |
+| `OPENAI_API_KEY` | Required for `--gpt` or `--both` |
+| `GEMINI_MODEL` | Gemini extraction model |
+| `OPENAI_MODEL` | OpenAI extraction model |
+| `EVAL_MODEL` | Stronger evaluation model metadata |
+| `GEOJSON_INPUT` | Input GeoJSON, usually `convert/sites.geojson` |
+| `GEOJSON_OUTPUT` | Output GeoJSON, usually `convert/sites.geojson` |
+| `GEMINI_CACHE_PATH` | Gemini cache path |
+| `GPT_CACHE_PATH` | GPT cache path |
+| `LLM_BATCH_LIMIT` | Optional number of new API rows to process |
+| `LLM_REQUEST_DELAY_SECONDS` | Delay between API calls |
+| `FORCE_LLM` | Set `1` to ignore cache and call APIs again |
 
-## Frontend Usage
+Python dependency for extraction filtering:
+
+```bash
+python3 -m pip install pandas
+```
+
+Optional cost estimate variables:
+
+```env
+GEMINI_INPUT_COST_PER_1M=
+GEMINI_OUTPUT_COST_PER_1M=
+GPT_INPUT_COST_PER_1M=
+GPT_OUTPUT_COST_PER_1M=
+```
+
+If prices are blank, `cost_estimate` is `null`.
+
+## Frontend
 
 Start a local server from the project root:
 
@@ -216,28 +299,17 @@ Open:
 http://localhost:8000/index/
 ```
 
-Use the category panel to filter Cultural, Natural, or Mixed sites. Use the timeline slider to filter by construction date. Click markers to see site details, the parsed built date, evidence text, and images where available.
+Timeline controls:
 
-## Troubleshooting
+- `All` clears the timeline filter and shows all category-matching sites, including `date: null`
+- `Unknown` keeps `date: null` sites visible while a specific timeline year is selected
 
-If the LLM script says the API key is missing, check `.env`:
+## Help
 
-```bash
-GEMINI_API_KEY=your_key_here
-```
-
-If a run is interrupted, run the same command again. The script saves after each row and reuses `LLM_CACHE_PATH`.
-
-If date parsing changes but you do not want to spend API requests, run:
+Each script has command help:
 
 ```bash
-NORMALIZE_ONLY=1 python3 convert/extract_construction_history.py
-```
-
-If the frontend does not load data, make sure the local server is started from the project root, not from inside `index/`.
-
-If cached results look wrong, either edit/remove `convert/llm_cache.json` or run:
-
-```bash
-FORCE_LLM=1 python3 convert/extract_construction_history.py
+python3 convert/extract_construction_history.py --help
+python3 convert/human_label_disagreements.py --help
+python3 convert/evaluate_construction_dates.py --help
 ```

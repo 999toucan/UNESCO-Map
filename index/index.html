@@ -310,13 +310,20 @@
       }
 
       .timeline-clear {
-        border: 1px solid #ddd;
-        background: #fff;
-        border-radius: 8px;
-        padding: 6px 10px;
-        cursor: pointer;
-        font-size: 12px;
-      }
+	  border: 1px solid #ddd;
+	  background: #fff;
+	  border-radius: 8px;
+	  padding: 0 12px;
+	  height: 36px;
+	  min-height: 36px;
+	  display: inline-flex;
+	  align-items: center;
+	  justify-content: center;
+	  box-sizing: border-box;
+	  white-space: nowrap;
+	  cursor: pointer;
+	  font-size: 12px;
+	}
       .timeline-clear:hover {
         background: #f7f7f7;
       }
@@ -325,6 +332,7 @@
         border-color: #111827;
         color: #fff;
       }
+	  
     </style>
   </head>
 
@@ -387,7 +395,7 @@
           type="button"
           aria-pressed="false"
         >
-          Unknown
+          Include Unknown Dates
         </button>
       </div>
       <div id="timelineLabels" class="timeline-labels" aria-hidden="true"></div>

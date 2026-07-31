@@ -32,7 +32,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const OLD_BC_TICK_YEARS_LIST = [-50000, -40000, -30000, -20000, -10000];
 
   let activeTimelineYear = null; // null = no timeline filter
-  let includeUnknownDatesWhenFiltering = false;
+  let activeDateFilterMode = "all"; // all | unknown | timeline
 
   // MAP SETUP
   const map = L.map("map", { preferCanvas: true, worldCopyJump: true }).setView(
@@ -183,11 +183,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function isFeatureVisibleAtTimelineYear(feature, selectedYear) {
-    if (selectedYear == null) return true;
-
     const props = feature?.properties || feature || {};
+    if (props.date === null) return false;
+    if (selectedYear == null) return false;
+
     const { start, end } = normalizeFeatureDate(props);
-    if (start == null || end == null) return includeUnknownDatesWhenFiltering;
+    if (start == null || end == null) return false;
 
     if (props?.date?.BC_AD === "LONG_AGO") {
       return selectedYear === LONG_AGO_YEAR;
@@ -204,8 +205,19 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function formatTimelineReadout(value) {
+    if (activeDateFilterMode === "unknown") return "Timeline: Unknown dates";
     if (value == null) return "Timeline: All dates";
     return `Timeline: ${formatYear(value)}`;
+  }
+
+  function isUnknownDateFeature(feature) {
+    return (feature?.properties || {}).date === null;
+  }
+
+  function isFeatureVisibleForDateFilter(feature) {
+    if (activeDateFilterMode === "all") return true;
+    if (activeDateFilterMode === "unknown") return isUnknownDateFeature(feature);
+    return isFeatureVisibleAtTimelineYear(feature, activeTimelineYear);
   }
 
   function timelineYearToSliderPosition(year) {
@@ -286,6 +298,13 @@ function addTimelineLabel(container, label, year, className = "") {
     span.className = "timeline-tick timeline-endpoint";
     span.style.left = positionPercent(timelineYearToSliderPosition(year));
     container.appendChild(span);
+  }
+
+  function setDateFilterButtonState(clearBtn, unknownBtn) {
+    clearBtn?.classList.toggle("is-active", activeDateFilterMode === "all");
+    clearBtn?.setAttribute("aria-pressed", String(activeDateFilterMode === "all"));
+    unknownBtn?.classList.toggle("is-active", activeDateFilterMode === "unknown");
+    unknownBtn?.setAttribute("aria-pressed", String(activeDateFilterMode === "unknown"));
   }
 
   function formatBuiltHistory(props) {
@@ -392,30 +411,37 @@ function addTimelineLabel(container, label, year, className = "") {
     }
 
     // Default to "All dates"
+    activeDateFilterMode = "all";
     activeTimelineYear = null;
     readout.textContent = formatTimelineReadout(activeTimelineYear);
+    setDateFilterButtonState(clearBtn, unknownBtn);
 
     // Drag updates while sliding
     slider.addEventListener("input", () => {
       const selectedYear = sliderPositionToTimelineYear(Number(slider.value));
 
+      activeDateFilterMode = "timeline";
       activeTimelineYear = selectedYear;
       slider.value = String(timelineYearToSliderPosition(selectedYear));
       readout.textContent = formatTimelineReadout(activeTimelineYear);
+      setDateFilterButtonState(clearBtn, unknownBtn);
       renderFiltered();
     });
 
     // Clear back to all
     clearBtn.addEventListener("click", () => {
+      activeDateFilterMode = "all";
       activeTimelineYear = null;
       readout.textContent = formatTimelineReadout(activeTimelineYear);
+      setDateFilterButtonState(clearBtn, unknownBtn);
       renderFiltered();
     });
 
     unknownBtn?.addEventListener("click", () => {
-      includeUnknownDatesWhenFiltering = !includeUnknownDatesWhenFiltering;
-      unknownBtn.classList.toggle("is-active", includeUnknownDatesWhenFiltering);
-      unknownBtn.setAttribute("aria-pressed", String(includeUnknownDatesWhenFiltering));
+      activeDateFilterMode = "unknown";
+      activeTimelineYear = null;
+      readout.textContent = formatTimelineReadout(activeTimelineYear);
+      setDateFilterButtonState(clearBtn, unknownBtn);
       renderFiltered();
     });
   }
@@ -435,7 +461,7 @@ function addTimelineLabel(container, label, year, className = "") {
         const props = feature?.properties || {};
         return (
           shouldShow(props?.[CATEGORY_FIELD]) &&
-          isFeatureVisibleAtTimelineYear(feature, activeTimelineYear)
+          isFeatureVisibleForDateFilter(feature)
         );
       },
 

@@ -110,29 +110,31 @@ def build_normalized_date(start_date, end_date, era, display):
 def format_display(start_date, end_date, era):
     if start_date == end_date:
         return f"{start_date} {era}"
-    return f"{start_date}-{end_date} {era}"
+    if era == "BC":
+        return f"{max(start_date, end_date)}-{min(start_date, end_date)} {era}"
+    return f"{min(start_date, end_date)}-{max(start_date, end_date)} {era}"
 
 
 def century_years(century, era):
     if era == "BC":
         start = (century - 1) * 100
         end = century * 100
-        return build_normalized_date(start, end, "BC", f"{start}-{end} BC")
+        return build_normalized_date(start, end, "BC", format_display(start, end, "BC"))
 
     start = (century - 1) * 100
     end = century * 100
-    return build_normalized_date(start, end, "AD", f"{start}-{end} AD")
+    return build_normalized_date(start, end, "AD", format_display(start, end, "AD"))
 
 
 def millennium_years(millennium, era):
     if era == "BC":
         start = (millennium - 1) * 1000
         end = millennium * 1000
-        return build_normalized_date(start, end, "BC", f"{start}-{end} BC")
+        return build_normalized_date(start, end, "BC", format_display(start, end, "BC"))
 
     start = (millennium - 1) * 1000
     end = millennium * 1000
-    return build_normalized_date(start, end, "AD", f"{start}-{end} AD")
+    return build_normalized_date(start, end, "AD", format_display(start, end, "AD"))
 
 
 def number_word_value(raw):

@@ -110,7 +110,7 @@ def build_normalized_date(start_date, end_date, era, display):
 def format_display(start_date, end_date, era):
     if start_date == end_date:
         return f"{start_date} {era}"
-    return f"{min(start_date, end_date)}-{max(start_date, end_date)} {era}"
+    return f"{start_date}-{end_date} {era}"
 
 
 def century_years(century, era):

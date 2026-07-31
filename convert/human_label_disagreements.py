@@ -31,8 +31,10 @@ def parse_args():
             "  convert/disagreements.csv\n\n"
             "Then edit convert/disagreements.csv by hand. Fill human_choice with:\n"
             "  gemini, gpt, tie, or neither\n\n"
-            "Optional exact ground truth columns:\n"
-            "  correct_start, correct_end, correct_BC_AD, correct_display\n\n"
+            "For manual corrections when human_choice is neither, fill:\n"
+            "  correct_start, correct_end, correct_BC_AD\n"
+            "Optional:\n"
+            "  correct_display\n\n"
             "Existing human label columns are preserved when this script is re-run."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

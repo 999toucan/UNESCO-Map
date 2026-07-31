@@ -710,55 +710,6 @@ def score_disagreements(root):
     print(json.dumps(score, indent=2))
 
 
-def output_from_labeled_row(row):
-    correct_date = parse_correct_date(row)
-    choice = str(row.get("human_choice") or "").strip().lower()
-    if correct_date:
-        built = clean_text(row.get("correct_display")) or correct_date.get("display")
-        return {"llm_built": built, "date": correct_date}
-    if choice == "gemini":
-        return {"llm_built": clean_text(row.get("gemini_llm_built")), "date": row_date(row, "gemini")}
-    if choice == "gpt":
-        return {"llm_built": clean_text(row.get("gpt_llm_built")), "date": row_date(row, "gpt")}
-    if choice == "tie":
-        built = clean_text(row.get("gemini_llm_built")) or clean_text(row.get("gpt_llm_built"))
-        date = row_date(row, "gemini") or row_date(row, "gpt")
-        return {"llm_built": built, "date": date}
-    if choice == "neither":
-        return {"llm_built": None, "date": None}
-    return None
-
-
-def build_dataset(root):
-    pd = require_pandas()
-    csv_path = root / "convert/disagreements.csv"
-    output_path = root / "convert/fine_tune_dataset.jsonl"
-    if not csv_path.exists():
-        raise SystemExit("Run convert/human_label_disagreements.py first, then label convert/disagreements.csv.")
-
-    count = 0
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = output_path.with_name(f"{output_path.name}.{os.getpid()}.{time.time_ns()}.tmp")
-    frame = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
-    with temp_path.open("w", encoding="utf-8", newline="\n") as target:
-        for row in frame.to_dict(orient="records"):
-            output = output_from_labeled_row(row)
-            if output is None:
-                continue
-            item = {
-                "input": {
-                    "site_name": row.get("name_en") or "",
-                    "description": row.get("short_description_en") or "",
-                },
-                "output": output,
-            }
-            target.write(json.dumps(item, ensure_ascii=False) + "\n")
-            count += 1
-    temp_path.replace(output_path)
-    print(f"Wrote {output_path}")
-    print(f"Rows: {count}")
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Run LLM extraction for UNESCO construction dates.",
@@ -782,7 +733,7 @@ def parse_args():
             "After extraction, run:\n"
             "  python3 convert/human_label_disagreements.py\n"
             "  Edit convert/disagreements.csv by hand\n"
-            "  python3 convert/evaluate_construction_dates.py --score --build-dataset"
+            "  python3 convert/evaluate_construction_dates.py --score --apply-final-dates"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

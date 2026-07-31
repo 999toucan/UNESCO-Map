@@ -1,32 +1,102 @@
 # UNESCO Heritage Map
 
-Interactive Leaflet map of UNESCO World Heritage Sites with category filters and a timeline based on estimated construction/origin dates.
+Interactive Leaflet map of UNESCO World Heritage Sites with category filters and a timeline based on estimated construction and origin dates.
 
-The frontend reads:
+![Project Demo](./demo.png)
+
+## Overview
+
+This repository has two main parts:
+
+- A frontend in `index/` that reads `convert/sites.geojson`
+- A data workflow in `convert/` for extracting, reviewing, and finalizing construction dates
+
+The workflow is:
 
 ```text
-convert/sites.geojson
+Run Gemini/GPT extraction -> compare disagreements -> label disagreements manually -> apply human-selected dates to sites.geojson -> display final dates in the Leaflet map
 ```
 
-## Main Workflow
+Prompting comes first, and human labels are the final source of truth written back into the GeoJSON used by the map.
 
-Use three separate scripts:
+## Key Features
+
+- Interactive Leaflet map of UNESCO World Heritage Sites
+- Category filters and timeline controls
+- Parallel date extraction workflow for Gemini and GPT
+- Human review step for disagreements between model outputs
+- Finalization step that writes human-selected normalized dates back into `convert/sites.geojson`
+- Resumable extraction caches written atomically after each row
+
+## Technologies Used
+
+- Frontend: Leaflet, static HTML/JS served locally
+- Data processing: Python
+- Dependency: `pandas`
+- Models:
+  - Gemini extraction: `gemini-2.5-flash-lite`
+  - OpenAI extraction: `gpt-4o-mini`
+  - Evaluation metadata: `gpt-4.1`
+
+## Installation
+
+Install the Python dependency:
+
+```bash
+python3 -m pip install pandas
+```
+
+Or use the repository dependency file:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+## Configuration
+
+Create `.env` from `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
+Important variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `GEMINI_API_KEY` | Required for `--gemini` or `--both` |
+| `OPENAI_API_KEY` | Required for `--gpt` or `--both` |
+| `GEMINI_MODEL` | Gemini extraction model |
+| `OPENAI_MODEL` | OpenAI extraction model |
+| `EVAL_MODEL` | Stronger evaluation model metadata |
+| `GEOJSON_INPUT` | Input GeoJSON, usually `convert/sites.geojson` |
+| `GEOJSON_OUTPUT` | Output GeoJSON, usually `convert/sites.geojson` |
+| `GEMINI_CACHE_PATH` | Gemini cache path |
+| `GPT_CACHE_PATH` | GPT cache path |
+| `LLM_BATCH_LIMIT` | Optional number of new API rows to process |
+| `LLM_REQUEST_DELAY_SECONDS` | Delay between API calls |
+| `FORCE_LLM` | Set `1` to ignore cache and call APIs again |
+
+Optional cost estimate variables:
+
+```env
+GEMINI_INPUT_COST_PER_1M=
+GEMINI_OUTPUT_COST_PER_1M=
+GPT_INPUT_COST_PER_1M=
+GPT_OUTPUT_COST_PER_1M=
+```
+
+If prices are blank, `cost_estimate` is `null`.
+
+## Usage
+
+### Main Workflow
 
 | Step | Script | Output |
 | --- | --- | --- |
-| 1. LLM extraction | `convert/extract_construction_history.py` | `convert/llm_cache_gemini.json`, `convert/llm_cache_gpt.json` |
+| 1. LLM extraction | `convert/extract_construction_history.py` | `convert/llm_cache_gemini.json`, `convert/llm_cache_gpt.json`, updated `convert/sites.geojson` |
 | 2. Human label prep | `convert/human_label_disagreements.py` | `convert/llm_disagreements.json`, `convert/disagreements.csv` |
-| 3. Evaluation/dataset | `convert/evaluate_construction_dates.py` | `convert/eval_score.json`, `convert/fine_tune_dataset.jsonl` |
-
-The idea is simple:
-
-```text
-Run Gemini/GPT extraction -> compare disagreements -> label CSV by hand -> score/build JSONL
-```
-
-Prompting comes first. Human-labeled disagreements become the benchmark. Fine-tuning is optional later.
-
-## Quick Commands
+| 3. Evaluation and finalization | `convert/evaluate_construction_dates.py` | `convert/eval_score.json`, updated `convert/sites.geojson` |
 
 Run both extraction models:
 
@@ -40,7 +110,7 @@ Create the human-label CSV:
 python3 convert/human_label_disagreements.py
 ```
 
-Edit this file by hand:
+Edit:
 
 ```text
 convert/disagreements.csv
@@ -55,34 +125,40 @@ tie
 neither
 ```
 
-If you know the exact correct date, also fill:
+For manual corrections when `human_choice` is `neither`, fill:
 
 ```text
-correct_start, correct_end, correct_BC_AD, correct_display
+correct_start, correct_end, correct_BC_AD
 ```
 
-Then score and build the labeled JSONL:
+Optional:
+
+```text
+correct_display
+```
+
+Then score labels and apply the final human-selected dates to the GeoJSON:
 
 ```bash
-python3 convert/evaluate_construction_dates.py --score --build-dataset
+python3 convert/evaluate_construction_dates.py --score --apply-final-dates
 ```
 
 Final useful outputs:
 
 ```text
 convert/eval_score.json
-convert/fine_tune_dataset.jsonl
+convert/sites.geojson
 ```
 
-## Extraction
+### Extraction
 
-Gemini extraction:
+Gemini only:
 
 ```bash
 python3 convert/extract_construction_history.py --gemini
 ```
 
-GPT extraction:
+GPT only:
 
 ```bash
 python3 convert/extract_construction_history.py --gpt
@@ -106,26 +182,24 @@ Force re-run API calls even when cache exists:
 python3 convert/extract_construction_history.py --both --force
 ```
 
-Local parser only, no API calls:
+Local parser only, with no API calls:
 
 ```bash
 NO_LLM=1 python3 convert/extract_construction_history.py --no-llm
 ```
 
-Extraction caches are resumable and saved atomically after each row.
-
 Cache behavior:
 
-- cached successful rows are reused automatically
-- pandas builds the filter table before API calls
-- duplicate rows are handled manually by cache key before API calls
+- Cached successful rows are reused automatically
+- `pandas` builds the filter table before API calls
+- Duplicate rows are handled manually by cache key before API calls
 - `heritage_category=Natural` rows are handled manually without LLM calls and cached as `date: null`
-- `LLM_BATCH_LIMIT` max batch API calls
-- if `LLM_BATCH_LIMIT` is larger than the filtered row count, only the filtered row count is sent
-- if every row is already cached, extraction makes no API calls
-- use `--force` or `FORCE_LLM=1` to ignore cache and call APIs again
+- `LLM_BATCH_LIMIT` sets the maximum number of new API rows to process
+- If `LLM_BATCH_LIMIT` is larger than the filtered row count, only the filtered row count is sent
+- If every row is already cached, extraction makes no API calls
+- Use `--force` or `FORCE_LLM=1` to ignore cache and call APIs again
 
-## Human Labels
+### Human Labeling
 
 Prepare disagreements:
 
@@ -133,41 +207,39 @@ Prepare disagreements:
 python3 convert/human_label_disagreements.py
 ```
 
-This compares the Gemini and GPT caches. A row is included when:
+A row is included when:
 
 - `llm_built` differs
-- normalized `date` differs
-- one model has `date: null` and the other does not
+- Normalized `date` differs
+- One model has `date: null` and the other does not
 
-It writes:
+This step writes:
 
 ```text
 convert/llm_disagreements.json
 convert/disagreements.csv
 ```
 
-The CSV is for humans. Re-running the script preserves existing label columns, so AI output does not overwrite your labels.
+Re-running the script preserves existing label columns, so AI output does not overwrite human labels. This step uses `pandas`, compares cache rows, and writes the CSV without calling any model.
 
-This step also uses pandas. It compares cache rows, preserves existing human labels, and writes the CSV without calling any model.
+### Finalization
 
-## Evaluation
+Apply final dates to the GeoJSON:
 
-Score labels:
+```bash
+python3 convert/evaluate_construction_dates.py --apply-final-dates
+```
+
+Score labels only:
 
 ```bash
 python3 convert/evaluate_construction_dates.py --score
 ```
 
-Build optional future fine-tune dataset:
-
-```bash
-python3 convert/evaluate_construction_dates.py --build-dataset
-```
-
 Do both:
 
 ```bash
-python3 convert/evaluate_construction_dates.py --score --build-dataset
+python3 convert/evaluate_construction_dates.py --score --apply-final-dates
 ```
 
 `--score` reads `convert/disagreements.csv` and writes:
@@ -176,116 +248,31 @@ python3 convert/evaluate_construction_dates.py --score --build-dataset
 convert/eval_score.json
 ```
 
-`--build-dataset` reads labeled rows and writes:
+`--apply-final-dates` reads labeled rows from `convert/disagreements.csv` and writes the selected final normalized dates back to:
 
 ```text
-convert/fine_tune_dataset.jsonl
+convert/sites.geojson
 ```
 
-Only labeled rows are included. Unlabeled rows are skipped.
+Selection rules:
 
-Scoring and dataset building use pandas to read/filter labeled rows. They do not call an LLM.
+- `gemini` uses the Gemini normalized date
+- `gpt` uses the GPT normalized date
+- `tie` uses the first available normalized date from Gemini or GPT
+- `neither` uses `correct_start`, `correct_end`, and `correct_BC_AD`
 
-## Models
+For manual corrections, `correct_display` is optional. If it is blank, the display string is generated automatically to match the GeoJSON format, including BC timeline normalization with negative values.
 
-Extraction uses lighter models:
+Unlabeled rows are skipped safely. The script reports:
 
-```env
-GEMINI_MODEL=gemini-2.5-flash-lite
-OPENAI_MODEL=gpt-4o-mini
-```
+- Gemini selections
+- GPT selections
+- Ties
+- Manual corrections
+- Skipped rows
+- Updated GeoJSON features
 
-Evaluation metadata uses a stronger model config:
-
-```env
-EVAL_MODEL=gpt-4.1
-```
-
-Human labels are still the ground truth.
-
-## Result Shape
-
-Each cached LLM extraction result is normalized to:
-
-```json
-{
-  "provider": "gemini",
-  "site_id": 123,
-  "site_name": "Example Site",
-  "llm_built": "17th century",
-  "llm_renovated": null,
-  "evidence": "short quote from the source text",
-  "date": {
-    "start_date": 1600,
-    "end_date": 1700,
-    "BC_AD": "AD",
-    "display": "1600-1700 AD",
-    "timeline_start": 1600,
-    "timeline_end": 1700
-  },
-  "confidence": "high",
-  "error": null,
-  "tokens_used": {
-    "input": 1000,
-    "output": 120,
-    "total": 1120
-  },
-  "latency_ms": 900,
-  "cost_estimate": null
-}
-```
-
-Rules:
-
-- `null`, `None`, `unknown`, and empty values become `date: null`
-- Natural heritage sites are not sent to extraction models
-- missing dates are not guessed
-- `A long time ago` is only for explicit million-year cases
-- malformed LLM dates are validated and may fall back to the local parser
-
-## Environment
-
-Create `.env` from `.env.example` and fill your keys:
-
-```bash
-cp .env.example .env
-```
-
-Important variables:
-
-| Variable | Purpose |
-| --- | --- |
-| `GEMINI_API_KEY` | Required for `--gemini` or `--both` |
-| `OPENAI_API_KEY` | Required for `--gpt` or `--both` |
-| `GEMINI_MODEL` | Gemini extraction model |
-| `OPENAI_MODEL` | OpenAI extraction model |
-| `EVAL_MODEL` | Stronger evaluation model metadata |
-| `GEOJSON_INPUT` | Input GeoJSON, usually `convert/sites.geojson` |
-| `GEOJSON_OUTPUT` | Output GeoJSON, usually `convert/sites.geojson` |
-| `GEMINI_CACHE_PATH` | Gemini cache path |
-| `GPT_CACHE_PATH` | GPT cache path |
-| `LLM_BATCH_LIMIT` | Optional number of new API rows to process |
-| `LLM_REQUEST_DELAY_SECONDS` | Delay between API calls |
-| `FORCE_LLM` | Set `1` to ignore cache and call APIs again |
-
-Python dependency for extraction filtering:
-
-```bash
-python3 -m pip install pandas
-```
-
-Optional cost estimate variables:
-
-```env
-GEMINI_INPUT_COST_PER_1M=
-GEMINI_OUTPUT_COST_PER_1M=
-GPT_INPUT_COST_PER_1M=
-GPT_OUTPUT_COST_PER_1M=
-```
-
-If prices are blank, `cost_estimate` is `null`.
-
-## Frontend
+### Frontend
 
 Start a local server from the project root:
 
@@ -299,17 +286,13 @@ Open:
 http://localhost:8000/index/
 ```
 
-Timeline controls:
+## Limitations or Known Issues
 
-- `All` clears the timeline filter and shows all category-matching sites, including `date: null`
-- `Unknown` keeps `date: null` sites visible while a specific timeline year is selected
+- Natural heritage sites are not sent to extraction models and are cached as `date: null`
+- `A long time ago` is only used for explicit million-year cases
+- Malformed LLM dates are validated and may fall back to the local parser
 
-## Help
+## Future Improvements
 
-Each script has command help:
+- Improve the disagreement review and finalization workflow for edge cases with missing or conflicting extracted dates
 
-```bash
-python3 convert/extract_construction_history.py --help
-python3 convert/human_label_disagreements.py --help
-python3 convert/evaluate_construction_dates.py --help
-```
